@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Ayham Video Editor</title>
+  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background: #121212;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    header {
+      background: #ff9800;
+      color: #000;
+      padding: 20px;
+      text-align: center;
+      font-size: 28px;
+      font-weight: bold;
+    }
+
+    #controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 15px;
+      background: #1f1f1f;
+      justify-content: center;
+    }
+
+    #controls input,
+    #controls button,
+    #aiPrompt {
+      padding: 10px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      background: #2c2c2c;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    #controls button:hover {
+      background: #3a3a3a;
+    }
+
+    #preview {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #000;
+      position: relative;
+    }
+
+    video {
+      max-width: 90%;
+      max-height: 80vh;
+      border: 2px solid #ff9800;
+      border-radius: 8px;
+    }
+
+    #overlayText {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      font-size: 24px;
+      font-weight: bold;
+      color: #ff9800;
+      pointer-events: none;
+    }
+
+    #aiResponse {
+      padding: 10px;
+      background: #1f1f1f;
+      color: #aaa;
+      font-size: 14px;
+      margin: 10px;
+      border-radius: 6px;
+    }
+
+    footer {
+      background: #1f1f1f;
+      padding: 10px;
+      text-align: center;
+      font-size: 14px;
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+
+  <header>Ayham Video Editor</header>
+
+  <div id="controls">
+    <input type="file" id="videoInput" accept="video/*">
+    <input type="file" id="soundInput" accept="audio/*">
+    <input type="number" id="startTime" placeholder="Start (sec)">
+    <input type="number" id="endTime" placeholder="End (sec)">
+    <input type="text" id="textOverlay" placeholder="Overlay text">
+    <button onclick="applyOverlay()">📝 Add Text</button>
+    <button onclick="trimVideo()">✂️ Trim</button>
+    <button onclick="exportVideo()">📤 Export</button>
+  </div>
+
+  <div id="preview">
+    <video id="videoPlayer" controls></video>
+    <div id="overlayText"></div>
+  </div>
+
+  <textarea id="aiPrompt" placeholder="Ask Ayham AI for help..."></textarea>
+  <button onclick="askAI()">🤖 Ask AI</button>
+  <div id="aiResponse"></div>
+
+  <footer>All features active — trim, overlay, sound, export, AI assistant 🔥</footer>
+
+  <script>
+    const videoInput = document.getElementById("videoInput");
+    const soundInput = document.getElementById("soundInput");
+    const videoPlayer = document.getElementById("videoPlayer");
+    const overlayText = document.getElementById("overlayText");
+    let currentVideoFile = null;
+
+    videoInput.addEventListener("change", () => {
+      const file = videoInput.files[0];
+      if (file) {
+        currentVideoFile = file;
+        const url = URL.createObjectURL(file);
+        videoPlayer.src = url;
+        videoPlayer.load();
+      }
+    });
+
+    function applyOverlay() {
+      const text = document.getElementById("textOverlay").value;
+      overlayText.textContent = text;
+    }
+
+    async function trimVideo() {
+      const { createFFmpeg, fetchFile } = FFmpeg;
+      const ffmpeg = createFFmpeg({ log: true });
+      await ffmpeg.load();
+
+      const start = document.getElementById("startTime").value;
+      const end = document.getElementById("endTime").value;
+
+      if (!currentVideoFile || !start || !end) {
+        alert("Upload a video and set start/end times.");
+        return;
+      }
+
+      ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(currentVideoFile));
+      await ffmpeg.run('-i', 'input.mp4', '-ss', start, '-to', end, '-c', 'copy', 'trimmed.mp4');
+
+      const data = ffmpeg.FS('readFile', 'trimmed.mp4');
+      const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+      videoPlayer.src = url;
+      videoPlayer.load();
+      currentVideoFile = new File([data.buffer], "trimmed.mp4", { type: "video/mp4" });
+      alert("Trim complete!");
+    }
+
+    async function exportVideo() {
+      const { createFFmpeg, fetchFile } = FFmpeg;
+      const ffmpeg = createFFmpeg({ log: true });
+      await ffmpeg.load();
+
+      if (!currentVideoFile) {
+        alert("Upload a video first.");
+        return;
+      }
+
+      ffmpeg.FS('writeFile', 'video.mp4', await fetchFile(currentVideoFile));
+
+      if (soundInput.files[0]) {
+        ffmpeg.FS('writeFile', 'sound.mp3', await fetchFile(soundInput.files[0]));
+        await ffmpeg.run('-i', 'video.mp4', '-i', 'sound.mp3', '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=shortest', '-c:v', 'copy', 'output.mp4');
+      } else {
+        await ffmpeg.run('-i', 'video.mp4', '-c', 'copy', 'output.mp4');
+      }
+
+      const data = ffmpeg.FS('readFile', 'output.mp4');
+      const blob = new Blob([data.buffer], { type: 'video/mp4' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "ayham-edited.mp4";
+      link.click();
+    }
+
+    async function askAI() {
+      const prompt = document.getElementById("aiPrompt").value;
+      const responseBox = document.getElementById("aiResponse");
+
+      const res = await fetch("/ask-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt })
+      });
+
+      const data = await res.json();
+      responseBox.textContent = data.reply;
+    }
+  </script>
+
+</body>
+</html>
